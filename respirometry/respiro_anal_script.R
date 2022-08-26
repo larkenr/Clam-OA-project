@@ -1,5 +1,6 @@
-# Title: metabolic rate analysis - mytilus tross/gallo
+# Title: metabolic rate analysis - Manila and Littleneck clams
 # Author: Matthew George; mattgeorgephd@gmail.com
+# Adapted by: Larken Root; larker@uw.edu
 # Date: 11/05/2021
 
 ## clear
