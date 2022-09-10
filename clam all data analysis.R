@@ -60,9 +60,9 @@ ggviolin(data.clean.resp, x = "ts", y = "umol.O2.normal",
          fill = "ts") +
   stat_compare_means(comparisons = my_comparisons, label = "p.signif")
 
-kruskal.test(umol.O2.normal ~ ts, data = data.clean.resp)
+ kruskal.test(umol.O2.normal ~ ts, data = data.clean.resp)
 
-pairwise.wilcox.test(data.clean.resp$umol.O2.normal, data.clean.resp$ts,
+pairwise.wilcox.test(data.clean.resp$umol.O2.normal, data.clean.resp$spawned,
                      p.adjust.method = "BH")
 
 ggboxplot(data.clean.resp, x = "ts", y = "umol.O2.normal",
@@ -88,15 +88,20 @@ ggdensity(data.clean.atp, x = "ATPase",
           add = "median")
 
 ggdensity(data.clean.atp, x = "ATPase",
-          fill = "treatment",
+          fill = "ts",
           add = "median")  +
   xlab("ATPase activity")  +
   facet_wrap(ts~.) +
   theme(strip.background = element_blank())
 
+ggviolin(data.clean.atp, x = "ts", y = "ATPase",
+         fill = "treatment") +
+  stat_compare_means(comparisons = my_comparisons, label = "p.signif")
+
 ggboxplot(data.clean.atp, x = "ts", y = "ATPase",
           fill = "treatment") +
-  ylab("ATPase activity")    +
+#  facet_wrap(ts~.)            +
+  ylab("ATPase activity")     +
   xlab("")                    +
   stat_compare_means(comparisons = my_comparisons, label = "p.signif")
 
@@ -105,7 +110,9 @@ kruskal.test(ATPase ~ sex, data = data.clean.atp)
 pairwise.wilcox.test(data.clean.atp$ATPase, data.clean.atp$ts,
                      p.adjust.method = "BH")
 
-### Reproductive state
+### ATPase and Respiration
+
+ggscatter(data.clean.resp,x="umol.O2.normal",y="ATPase",color="species",palette=c("red","black"))
 
 
 ### 
