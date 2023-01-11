@@ -1,51 +1,344 @@
-install.packages("reshape2")
-install.packages("ggpmisc")
+### add some intro material here ###
+install.packages("bestNormalize")
+install.packages("vctrs")
+install.packages("bbmle")
+install.packages("AICcmodavg")
+install.packages("summarytools")
 
 library(tidyverse)
 library(ggpubr)
 library(rstatix)
 library(broom)
 library(datarium)
-library(dplyr)
+
 library(reshape2)
 library(ggpmisc)
 library(splus2R)
 
+library(nlme)
+library(agricolae)
+library(multcomp)
+
+
+
+
+# get data and format #
+
 setwd("~/Git/Clam-OA-project")
-data <-read.csv("clam full data.csv")
-data$ts <- substring(data$ID,1,3)
+data <-read.csv("clam_full_data.csv")
+colnames(data)[1] <- gsub('^...','',colnames(data)[1])
+
+# add column for treatment/species groups #
+
+data$ts <- substring(data$If,1,3)
 data$ts <- factor(data$ts,     
                   levels = c("L-C", "L-T", "M-C", "M-T"))
-data$treatment <- substring(data$ID,3,3)
+
+library(dplyr)
+
 data$treatment <- recode_factor(data$treatment, C = "Ambient", T = "OA")
-data$species <- substring(data$ID,1,1)
 
 my_comparisons <- list( c("L-C", "L-T"), c("M-C", "M-T"), c("L-C", "M-C"), c("L-T", "M-T") )
 
-### Respirometry
 
-data.resp <- data
-data.clean.resp <- na.omit(data.resp)
+### normalize Respirometry data ###
+
+# data.resp <- data
+# data.clean.resp <- na.omit(data.resp)
 
 # calculate clam volume
 
-data.clean.resp$length <- as.numeric(data.clean.resp$length)
-data.clean.resp$width <- as.numeric(data.clean.resp$width)
-data.clean.resp$depth <- as.numeric(data.clean.resp$depth)
+data$length <- as.numeric(data$length)
+data$width <- as.numeric(data$width)
+data$depth <- as.numeric(data$depth)
 
-data.clean.resp$volume <- ((data.clean.resp$length/2) * (data.clean.resp$width/2) * (data.clean.resp$depth/2)/1000) * (4/3) * pi
+data$volume <- ((data$length/2) * (data$width/2) * (data$depth/2)/1000) * (4/3) * pi
 
 # calculate clam mass based on volume (equations derived from excel) and normalize O2 
 
-data.clean.resp$mass <-  ifelse(data.clean.resp$species == "L",
-                                (data.clean.resp$volume * 0.0518) - 0.0229, 
-                                (data.clean.resp$volume * 0.0617) - 0.0288)
+data$mass <-  ifelse(data$species == "littleneck",
+                                (data$volume * 0.0518) - 0.0229, 
+                                (data$volume * 0.0617) - 0.0288)
 
-data.clean.resp$umol.O2.normal <- data.clean.resp$umol.O2/data.clean.resp$mass
+data$umol.O2.normal <- data$umol.O2/data$mass
 
-data.split.resp.ts <- split(data.clean.resp, data.clean.resp$ts, drop=TRUE)
+#data.split.resp.ts <- split(data.clean.resp, data.clean.resp$ts, drop=TRUE)
 
-data.split.resp.s  <- split(data.clean.resp, data.clean.resp$species, drop=TRUE)
+#data.split.resp.s  <- split(data.clean.resp, data.clean.resp$species, drop=TRUE)
+
+####### Statistics #######
+
+# factorize the various variable # 
+
+data$species <- factor(data$species, levels = c("manila","littleneck"))
+data$sex <- factor(data$sex, levels = c("f","m"))
+data$spawned <- factor(data$spawned, levels = c("n","y"))
+data$stage <- factor(data$stage, levels = c("5","4","3"))
+data$mort <- factor(data$mort, levels = c("n","y"))
+
+### respiration ANOVAs ###
+
+# check normality of data #
+
+test_resp <- data$umol.O2.normal
+
+qqnorm(test_resp, main = "Q-Q Plot: untransformed") # check linearity
+qqline(test_resp)
+norm_test <- shapiro.test(test_resp) # p-value > 0.05 = good, don't need transformation
+print(paste("shapiro test p-value, untransformed:", norm_test$p.value))
+
+# Normalize response variable if normality test failed (spoiler, it did)
+
+library(bestNormalize)
+
+if(norm_test$p.value<0.05)     {
+  normalized <- bestNormalize(test_resp, main = "Q-Q Plot: transformed")
+  test_resp <- normalized$x.t # overwrite
+  qqnorm(test_resp) # check linearity of transformed response
+  qqline(test_resp)
+  norm_test <- shapiro.test(test_resp) # p-value > 0.05 = good
+  print(paste("shapiro test p-value, transformed:", norm_test$p.value))}
+data$response <- test_resp # overwrite
+
+# run ANOVA #
+
+my_test <- aov(response ~ species * treatment * sex * spawned * stage, data = data)
+my_test_summary <- summary(my_test)
+summary(my_test)
+
+# Compare model AIC scores (lowest score wins)
+other <- aov(response ~ species * sex * stage, data = data)
+other2 <- aov(response ~ species * treatment * spawned, data = data)
+other3 <- aov(response ~ species * spawned, data = data)
+other4 <- aov(response ~ treatment * spawned, data = data)
+other5 <- aov(response ~ treatment * sex * stage, data = data)
+other6 <- aov(response ~ species * treatment * sex * stage, data = data)
+
+model.set <- list(my_test, other, other2, other3, other4, other5, other6)
+model.names <- c("species:treatment:sex:spawned:stage", "species:sex:stage","species:spawned:treatment",
+                 "species:spawned","treatment:spawned","treatment:sex:stage","species:treatment:sex:stage")
+
+library(AICcmodavg)
+
+aictab(model.set, modnames = model.names)
+
+other2_summary <- summary(other2)
+summary(other2)
+
+other4_summary <- summary(other4)
+summary(other4)
+
+### ATPase ###
+
+test_atp <- data$ATPase
+
+qqnorm(test_atp, main = "Q-Q Plot: untransformed") # check linearity
+qqline(test_atp)
+norm_test_atp <- shapiro.test(test_atp) # p-value > 0.05 = good, don't need transformation
+print(paste("shapiro test p-value, untransformed:", norm_test_atp$p.value))
+
+# run ANOVA #
+
+my_test_atp <- aov(ATPase ~ species * treatment * sex * spawned * stage, data = data)
+my_test_atp_summary <- summary(my_test_atp)
+summary(my_test_atp)
+
+# Compare model AIC scores (lowest score wins)
+other <- aov(ATPase ~ sex * stage, data = data)
+other2 <- aov(ATPase ~ treatment * spawned * stage, data = data)
+other3 <- aov(ATPase ~ species * spawned * stage, data = data)
+other4 <- aov(ATPase ~ sex * spawned * stage, data = data)
+
+model.set <- list(my_test_atp, other, other2, other3, other4)
+model.names <- c("species:treatment:sex:spawned:stage", "sex:stage",
+                 "stage:spawned:treatment","species:spawned:stage","sex:spawned:stage")
+
+aictab(model.set, modnames = model.names)
+
+
+other_summary <- summary(other)
+summary(other)
+
+other2_summary <- summary(other2)
+summary(other2)
+
+other3_summary <- summary(other3)
+summary(other3)
+
+other4_summary <- summary(other4)
+summary(other4)
+
+### spawned ###
+
+# Calculate the chi-squared statistic and p-value for the test
+data$sp_sex <- paste(data$species,data$sex)
+
+# Identify rows with complete cases (i.e., no NA values) in the `cyl` column
+complete_rows <- complete.cases(data$stage)
+
+# Subset the data frame to include only rows with complete cases in the `cyl` column
+data.naomit <- data[complete_rows,]
+
+manila_f <- subset(data, sp_sex == "manila f")
+manila_m <- subset(data, sp_sex == "manila m")
+littleneck_f <- subset(data, sp_sex == "littleneck f")
+littleneck_m <- subset(data, sp_sex == "littleneck m")
+
+manila_f_st <- subset(data.naomit, sp_sex == "manila f")
+manila_m_st <- subset(data.naomit, sp_sex == "manila m")
+littleneck_f_st <- subset(data.naomit, sp_sex == "littleneck f")
+littleneck_m_st <- subset(data.naomit, sp_sex == "littleneck m")
+
+chisq.test(manila_f$treatment, manila_f$stage)
+chisq.test(manila_m$treatment, manila_m$stage)
+chisq.test(littleneck_f$treatment, littleneck_f$stage)
+chisq.test(littleneck_m$treatment, littleneck_m$stage)
+
+chisq.test(manila_f$treatment, manila_f$spawned)
+chisq.test(manila_m$treatment, manila_m$spawned)
+chisq.test(littleneck_f$treatment, littleneck_f$spawned)
+chisq.test(littleneck_m$treatment, littleneck_m$spawned)
+
+chisq.test(manila_f$treatment, manila_f$mort)
+chisq.test(manila_m$treatment, manila_m$mort)
+chisq.test(littleneck_f$treatment, littleneck_f$mort)
+chisq.test(littleneck_m$treatment, littleneck_m$mort)
+
+chisq.test(manila_f_st$stage, manila_f$spawned)
+chisq.test(manila_m_st$stage, manila_m$spawned)
+chisq.test(littleneck_f_st$stage, littleneck_f$spawned)
+chisq.test(littleneck_m_st$stage, littleneck_m$spawned)
+
+library(summarytools)
+
+
+# fourth method:
+
+manila_f %$%
+  ctable(treatment, spawned,
+         prop = "r", chisq = TRUE, headings = FALSE
+  ) %>%
+  print(
+    method = "render",
+    style = "rmarkdown",
+    footnote = NA
+  )
+
+manila_m %$%
+  ctable(treatment, spawned,
+         prop = "r", chisq = TRUE, headings = FALSE
+  ) %>%
+  print(
+    method = "render",
+    style = "rmarkdown",
+    footnote = NA
+  )
+
+littleneck_f %$%
+  ctable(treatment, spawned,
+         prop = "r", chisq = TRUE, headings = FALSE
+  ) %>%
+  print(
+    method = "render",
+    style = "rmarkdown",
+    footnote = NA
+  )
+
+littleneck_m %$%
+  ctable(treatment, spawned,
+         prop = "r", chisq = TRUE, headings = FALSE
+  ) %>%
+  print(
+    method = "render",
+    style = "rmarkdown",
+    footnote = NA
+  )
+
+## morts ##
+
+manila_f %$%
+  ctable(treatment, mort,
+         prop = "r", chisq = TRUE, headings = FALSE
+  ) %>%
+  print(
+    method = "render",
+    style = "rmarkdown",
+    footnote = NA
+  )
+
+manila_m %$%
+  ctable(treatment, mort,
+         prop = "r", chisq = TRUE, headings = FALSE
+  ) %>%
+  print(
+    method = "render",
+    style = "rmarkdown",
+    footnote = NA
+  )
+
+littleneck_f %$%
+  ctable(treatment, mort,
+         prop = "r", chisq = TRUE, headings = FALSE
+  ) %>%
+  print(
+    method = "render",
+    style = "rmarkdown",
+    footnote = NA
+  )
+
+littleneck_m %$%
+  ctable(treatment, mort,
+         prop = "r", chisq = TRUE, headings = FALSE
+  ) %>%
+  print(
+    method = "render",
+    style = "rmarkdown",
+    footnote = NA
+  )
+
+## stage ##
+
+manila_f_st %$%
+  ctable(treatment, stage,
+         prop = "r", chisq = TRUE, headings = FALSE
+  ) %>%
+  print(
+    method = "render",
+    style = "rmarkdown",
+    footnote = NA
+  )
+
+manila_m_st %$%
+  ctable(treatment, stage,
+         prop = "r", chisq = TRUE, headings = FALSE
+  ) %>%
+  print(
+    method = "render",
+    style = "rmarkdown",
+    footnote = NA
+  )
+
+littleneck_f_st %$%
+  ctable(treatment, stage,
+         prop = "r", chisq = TRUE, headings = FALSE
+  ) %>%
+  print(
+    method = "render",
+    style = "rmarkdown",
+    footnote = NA
+  )
+
+littleneck_m_st %$%
+  ctable(treatment, stage,
+         prop = "r", chisq = TRUE, headings = FALSE
+  ) %>%
+  print(
+    method = "render",
+    style = "rmarkdown",
+    footnote = NA
+  )
+
+###### graphics #####
 
 # density graphs
 
