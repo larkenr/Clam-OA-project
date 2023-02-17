@@ -10,7 +10,9 @@ data <-read.csv("enviro_data.csv")
 colnames(data)[1] <- gsub('^...','',colnames(data)[1])
 data$group <- paste(data$treatment,data$rep_type)
 
-mean_data <- data %>%
+data_clean <- na.omit(data)
+
+mean_data <- data_clean %>%
   group_by(day,group) %>%
   summarize_all(mean)
 
@@ -41,6 +43,11 @@ plot_grid(s,p,t,
           nrow=3)
 
 ### alkalinity calc ###
-data$dic <- carb(flag = 8, data$ph_with_correction, data$alkalinity/1000000, T = data$spectrometery_temperature, S = data$salinity)$DIC * 1000000
+mean_data$dic <- carb(flag = 8, mean_data$ph_with_correction, mean_data$alkalinity/1000000, T = mean_data$spectrometery_temperature, S = mean_data$salinity)$DIC * 1000000
 
-data$insitu_pH <- carb(flag = 15, data$alkalinity/1000000, data$dic/1000000, T = data$insitu_temperature, S = data$salinity)$pH
+mean_data$insitu_pH <- carb(flag = 15, mean_data$alkalinity/1000000, mean_data$dic/1000000, T = mean_data$insitu_temperature, S = mean_data$salinity)$pH
+
+isp <- ggplot(mean_data, aes(x=day,y=insitu_pH,color = group)) +
+  geom_line() + 
+  xlab("")
+isp
